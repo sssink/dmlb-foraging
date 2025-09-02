@@ -1,5 +1,5 @@
 """
-2D rendering of the level based foraging domain
+2D rendering of Dynamic Multi-Level-based Foraging (DMLBF) domain
 """
 
 import math
@@ -13,7 +13,7 @@ from gymnasium import error
 if "Apple" in sys.version:
     if "DYLD_FALLBACK_LIBRARY_PATH" in os.environ:
         os.environ["DYLD_FALLBACK_LIBRARY_PATH"] += ":/usr/lib"
-        # (JDS 2016/04/15): avoid bug on Anaconda 2.3.0 / Yosemite
+        # (JDS 2016/04/15): special environment variable settings for Apple systems to avoid bug on Anaconda 2.3.0 / Yosemite
 
 
 try:
@@ -69,14 +69,15 @@ def get_display(spec):
         )
 
 
-class Viewer(object):
-    def __init__(self, world_size):
+class Viewer(object): # Visualization Renderer Class - responsible for creating windows and rendering all elements in the environment
+    def __init__(self, world_size): # world_size: The size of the world, in the format of (number of rows, number of columns)
         display = get_display(None)
         self.rows, self.cols = world_size
-
+        
+        # set the size of grid and icon
         self.grid_size = 50
         self.icon_size = 20
-
+        # set the size of window
         self.width = 1 + self.cols * (self.grid_size + 1)
         self.height = 1 + self.rows * (self.grid_size + 1)
         self.window = pyglet.window.Window(
@@ -84,13 +85,12 @@ class Viewer(object):
         )
         self.window.on_close = self.window_closed_by_user
         self.isopen = True
-
+        # Enable OpenGL blending function for translucent effects
         glEnable(GL_BLEND)
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
-
+        # Load image resources
         script_dir = os.path.dirname(__file__)
-
-        pyglet.resource.path = [os.path.join(script_dir, "icons")]
+        pyglet.resource.path = [os.path.join(script_dir, "icons")] # set path of resourses
         pyglet.resource.reindex()
 
         self.img_apple = pyglet.resource.image("apple.png")
@@ -103,7 +103,7 @@ class Viewer(object):
         self.isopen = False
         exit()
 
-    def set_bounds(self, left, right, bottom, top):
+    def set_bounds(self, left, right, bottom, top): # Set rendering boundary
         assert right > left and top > bottom
         scalex = self.width / (right - left)
         scaley = self.height / (top - bottom)
@@ -112,6 +112,16 @@ class Viewer(object):
         )
 
     def render(self, env, return_rgb_array=False):
+        """
+        The main methods of rendering the environment
+
+        Parameters:
+            env: The environment object to be rendered
+            return_rgb_array: Whether to return the RGB array instead of displaying the graph
+        return:
+            If `return_rgb_array` is set to `True`, the RGB array representation of the environment will be returned;
+            Otherwise, return the status of whether the window is open (Boolean value)
+        """
         glClearColor(*_WHITE, 0)
         self.window.clear()
         self.window.switch_to()
@@ -170,7 +180,7 @@ class Viewer(object):
         batch.draw()
 
     def _draw_food(self, env):
-        idxes = list(zip(*env.field.nonzero()))
+        idxes = list(zip(*np.where(np.any(env.field > 0, axis=2))))
         apples = []
         batch = pyglet.graphics.Batch()
 
@@ -189,7 +199,8 @@ class Viewer(object):
         batch.draw()
 
         for row, col in idxes:
-            self._draw_badge(row, col, env.field[row, col])
+            level_str = ",".join(map(str, env.field[row, col]))
+            self._draw_badge(row, col, level_str)
 
     def _draw_players(self, env):
         players = []
@@ -209,12 +220,13 @@ class Viewer(object):
             p.update(scale=self.grid_size / p.width)
         batch.draw()
         for p in env.players:
-            self._draw_badge(*p.position, p.level)
+            level_str = ",".join(map(str, p.level))
+            self._draw_badge(*p.position, level_str)
 
-    def _draw_badge(self, row, col, level):
+    def _draw_badge(self, row, col, level): # draw level badge
         resolution = 6
-        radius = self.grid_size / 5
-
+        radius = self.grid_size / 4 # radius of badge
+        # calculate position of badge
         badge_x = col * (self.grid_size + 1) + (3 / 4) * (self.grid_size + 1)
         badge_y = (
             self.height
@@ -234,6 +246,8 @@ class Viewer(object):
         circle.draw(GL_POLYGON)
         glColor3ub(*_BLACK)
         circle.draw(GL_LINE_LOOP)
+
+        font_size = 8 if len(str(level)) > 3 else 12
         label = pyglet.text.Label(
             str(level),
             font_name="Times New Roman",
