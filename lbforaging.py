@@ -6,6 +6,7 @@ import gymnasium as gym
 import numpy as np
 
 import lbforaging  # noqa
+from lbforaging.agents.heuristic_agent import H3, H4
 
 logger = logging.getLogger(__name__)
 
@@ -15,14 +16,19 @@ def _game_loop(env, render):
     obss, _ = env.reset()
     done = False
 
-    returns = np.zeros(env.n_agents)
+    returns = np.zeros(env.unwrapped.n_agents)
+
+    for player in env.unwrapped.players:
+        player.set_controller(H4(player))
 
     if render:
         env.render()
         time.sleep(0.5)
 
     while not done:
-        actions = env.action_space.sample()
+        # actions = env.action_space.sample()
+        print(obss)
+        actions = [player.controller.step(obs) for player, obs in zip(env.unwrapped.players, obss)]
 
         obss, rewards, done, _, _ = env.step(actions)
         returns += rewards
@@ -35,8 +41,7 @@ def _game_loop(env, render):
 
 
 def main(episodes=1, render=False):
-    env = gym.make("Foraging-8x8-2p-2f-v3")
-
+    env = gym.make("Foraging-8x8-3p-2f-2d-pen-v3")
     for episode in range(episodes):
         _game_loop(env, render)
 
