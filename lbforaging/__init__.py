@@ -45,7 +45,7 @@ for s, p, f, mfl, c, po, pen, dim in product(
     )
 
 
-def register_grid_envs():
+def register_grid_envs(): # no test
     for s, p, f, mfl, c, dim in product(sizes, players, foods, max_food_level, coop, level_dim):
         for sight in range(1, s + 1):
             register(

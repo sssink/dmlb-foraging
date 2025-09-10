@@ -35,7 +35,7 @@ def _game_loop(env, render):
 
         if render:
             env.render()
-            time.sleep(0.5)
+            time.sleep(5)
 
     print("Returns: ", returns)
 
