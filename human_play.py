@@ -27,7 +27,7 @@ def parse_args():
     parser.add_argument(
         "--env",
         type=str,
-        default="Foraging-8x8-2p-2f-v3",
+        default="Foraging-8x8-3p-2f-2d-v3",
         help="Environment to use",
     )
     parser.add_argument(

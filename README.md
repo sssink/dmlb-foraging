@@ -1,6 +1,6 @@
 
 <p align="center">
- <img width="350px" src="docs/img/logo.png" align="center" alt="Level Based Foraging (LBF)" />
+ <img width="350px" src="docs/img/logo.png" align="center" alt="Dynamic Multi-Level-based Foraging (DMLBF)" />
  <p align="center">A multi-agent reinforcement learning environment</p>
 </p>
 
@@ -37,7 +37,7 @@ This environment is a mixed cooperative-competitive game, which focuses on the c
  <img width="450px" src="docs/img/lbf.gif" align="center" alt="Level Based Foraging (LBF) illustration" />
 </p>
 
-More specifically, agents are placed in the grid world, and each is assigned a level. Food is also randomly scattered, each having a level on its own. Agents can navigate the environment and can attempt to collect food placed next to them. The collection of food is successful only if the sum of the levels of the agents involved in loading is equal to or higher than the level of the food. Finally, agents are awarded points equal to the level of the food they helped collect, divided by their contribution (their level). The figures below show two states of the game, one that requires cooperation, and one more competitive.
+More specifically, agents are placed in the grid world, and each is assigned a level vector (formerly a scalar level). Food is also randomly scattered, each having a level vector on its own. Agents can navigate the environment and can attempt to collect food placed next to them. The collection of food is successful only if the sum of the levels of the agents involved in loading meets or exceeds the food's level vector in each dimension. Finally, agents are awarded points based on the food's level vector and their contribution proportional to their level vector components. The figures below show two states of the game, one that requires cooperation, and one more competitive.
 
 
 While it may appear simple, this is a very challenging environment, requiring the cooperation of multiple agents while being competitive at the same time. In addition, the discount factor also necessitates speed for the maximisation of rewards. Each agent is only awarded points if it participates in the collection of food, and it has to balance between collecting low-levelled food on his own or cooperating in acquiring higher rewards. In situations with three or more agents, highly strategic decisions can be required, involving agents needing to choose with whom to cooperate. Another significant difficulty for RL algorithms is the sparsity of rewards, which causes slower learning.
@@ -57,8 +57,8 @@ pip install lbforaging
 ```
 Or to ensure that you have the latest version:
 ```sh
-git clone https://github.com/semitable/lb-foraging.git
-cd lb-foraging
+git clone https://github.com/sssink/dmlb-foraging.git
+cd lbforaging
 pip install -e .
 ```
 
@@ -74,12 +74,12 @@ import lbforaging
 
 Then create an environment:
 ```python
-env = gym.make("Foraging-8x8-2p-1f-v3")
+env = gym.make("Foraging-8x8-2p-1f-2d-v3")
 ```
 
 We offer a variety of environments using this template:
 ```
-"Foraging-{GRID_SIZE}x{GRID_SIZE}-{PLAYER COUNT}p-{FOOD LOCATIONS}f{-coop IF COOPERATIVE MODE}-v0"
+"Foraging-{GRID_SIZE}x{GRID_SIZE}-{PLAYER COUNT}p-{FOOD LOCATIONS}f-{DIMENSION}d{-coop IF COOPERATIVE MODE}-v0"
 ```
 
 But you can register your own variation using (change parameters as needed):
@@ -87,7 +87,7 @@ But you can register your own variation using (change parameters as needed):
 from gym.envs.registration register
 
 register(
-    id="Foraging-{0}x{0}-{1}p-{2}f{3}-v3".format(s, p, f, "-coop" if c else ""),
+    id="Foraging-{0}x{0}-{1}p-{2}f-{3}d{4}-v3".format(s, p, f, d, "-coop" if c else ""),
     entry_point="lbforaging.foraging:ForagingEnv",
     kwargs={
         "players": p,
@@ -97,6 +97,7 @@ register(
         "sight": s,
         "max_episode_steps": 50,
         "force_coop": c,
+        "level_dim": d,
     },
 )
 ```
@@ -133,7 +134,13 @@ Also, ALL actions are valid. If an agent cannot move to a location or load, his 
 
 ## Rewards
 
-The rewards are calculated as follows. When one or more agents load a food, the food level is rewarded to the agents weighted with the level of each agent. Then the reward is normalised so that at the end, the sum of the rewards (if all foods have been picked-up) is one. 
+The rewards are calculated as follows. When one or more agents load a food, the food level vector is considered. The collection is successful only if the sum of the agents' level vectors meets or exceeds the food's level vector in each dimension. 
+
+For the rewards distribution:
+1. Each agent's contribution is determined by their level vector components relative to the sum of all participating agents' level vectors
+2. The reward for each agent is calculated based on this contribution proportion and the food's level vector
+3. If enabled, the reward is normalized so that the sum of rewards (if all foods have been picked-up) is one
+
 If you prefer code:
 
 ```python

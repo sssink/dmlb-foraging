@@ -47,6 +47,7 @@ _BLACK = (0, 0, 0)
 _WHITE = (255, 255, 255)
 _GREEN = (0, 255, 0)
 _RED = (255, 0, 0)
+_BLUE = (0, 0, 255)
 
 _BACKGROUND_COLOR = _WHITE
 _GRID_COLOR = _BLACK
@@ -131,6 +132,19 @@ class Viewer(object): # Visualization Renderer Class - responsible for creating 
         self._draw_food(env)
         self._draw_players(env)
 
+        time_step_label = pyglet.text.Label(
+            f"Step: {env.current_step}",
+            font_name="Times New Roman",
+            font_size=14,
+            bold=True,
+            x=20,
+            y=self.height - 20,
+            anchor_x="left",
+            anchor_y="top",
+            color=(*_BLUE, 255),
+        )
+        time_step_label.draw()
+
         if return_rgb_array:
             buffer = pyglet.image.get_buffer_manager().get_color_buffer()
             image_data = buffer.get_image_data()
@@ -181,26 +195,36 @@ class Viewer(object): # Visualization Renderer Class - responsible for creating 
 
     def _draw_food(self, env):
         idxes = list(zip(*np.where(np.any(env.field > 0, axis=2))))
-        apples = []
-        batch = pyglet.graphics.Batch()
+        visible_apples = []
+        invisible_apples = []
+        batch_visible = pyglet.graphics.Batch()
+        batch_invisible = pyglet.graphics.Batch()
 
         # print(env.field)
         for row, col in idxes:
-            apples.append(
-                pyglet.sprite.Sprite(
+            apple = pyglet.sprite.Sprite(
                     self.img_apple,
                     (self.grid_size + 1) * col,
                     self.height - (self.grid_size + 1) * (row + 1),
-                    batch=batch,
+                    batch=None,
                 )
-            )
-        for a in apples:
-            a.update(scale=self.grid_size / a.width)
-        batch.draw()
+            apple.update(scale=self.grid_size / apple.width)
+            if env.is_food_visible(row, col):
+                apple.batch = batch_visible
+                visible_apples.append(apple)
+            else:
+                apple.batch = batch_invisible
+                apple.opacity = 50
+                invisible_apples.append(apple)
+        
+        batch_visible.draw()
+        batch_invisible.draw()
 
         for row, col in idxes:
             level_str = ",".join(map(str, env.field[row, col]))
-            self._draw_badge(row, col, level_str)
+            self._draw_level_badge(row, col, level_str)
+            spawn_time = str(env.food_spawn_time[row, col])
+            self._draw_time_badge(row, col, spawn_time)
 
     def _draw_players(self, env):
         players = []
@@ -221,9 +245,9 @@ class Viewer(object): # Visualization Renderer Class - responsible for creating 
         batch.draw()
         for p in env.players:
             level_str = ",".join(map(str, p.level))
-            self._draw_badge(*p.position, level_str)
+            self._draw_level_badge(*p.position, level_str)
 
-    def _draw_badge(self, row, col, level): # draw level badge
+    def _draw_level_badge(self, row, col, level): # draw level badge
         resolution = 6
         radius = self.grid_size / 4 # radius of badge
         # calculate position of badge
@@ -251,7 +275,7 @@ class Viewer(object): # Visualization Renderer Class - responsible for creating 
         label = pyglet.text.Label(
             str(level),
             font_name="Times New Roman",
-            font_size=12,
+            font_size=font_size,
             bold=True,
             x=badge_x,
             y=badge_y + 2,
@@ -260,3 +284,42 @@ class Viewer(object): # Visualization Renderer Class - responsible for creating 
             color=(*_BLACK, 255),
         )
         label.draw()
+
+    def _draw_time_badge(self, row, col, time): # draw time badge
+        resolution = 20
+        radius = self.grid_size / 6 # radius of badge
+        # calculate position of badge
+        badge_x = col * (self.grid_size + 1) + (3 / 4) * (self.grid_size + 1)
+        badge_y = (
+            self.height
+            - (self.grid_size + 1) * (row + 1)
+            + (3 / 4) * (self.grid_size + 1)
+        )
+
+        # make a circle
+        verts = []
+        for i in range(resolution):
+            angle = 2 * math.pi * i / resolution
+            x = radius * math.cos(angle) + badge_x
+            y = radius * math.sin(angle) + badge_y
+            verts += [x, y]
+        circle = pyglet.graphics.vertex_list(resolution, ("v2f", verts))
+        glColor3ub(*_WHITE)
+        circle.draw(GL_POLYGON)
+        glColor3ub(*_BLACK)
+        circle.draw(GL_LINE_LOOP)
+
+        font_size = 8 if len(str(time)) > 2 else 12
+        label = pyglet.text.Label(
+            str(time),
+            font_name="Times New Roman",
+            font_size=font_size,
+            bold=True,
+            x=badge_x,
+            y=badge_y + 2,
+            anchor_x="center",
+            anchor_y="center",
+            color=(*_BLACK, 200),
+        )
+        label.draw()
+

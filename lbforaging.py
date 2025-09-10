@@ -18,24 +18,24 @@ def _game_loop(env, render):
 
     returns = np.zeros(env.unwrapped.n_agents)
 
-    for player in env.unwrapped.players:
-        player.set_controller(H4(player))
+    # for player in env.unwrapped.players:
+    #     player.set_controller(H4(player))
 
     if render:
         env.render()
         time.sleep(0.5)
 
     while not done:
-        # actions = env.action_space.sample()
-        print(obss)
-        actions = [player.controller.step(obs) for player, obs in zip(env.unwrapped.players, obss)]
+        actions = env.action_space.sample()
+        # print(obss)
+        # actions = [player.controller.step(obs) for player, obs in zip(env.unwrapped.players, obss)]
 
         obss, rewards, done, _, _ = env.step(actions)
         returns += rewards
 
         if render:
             env.render()
-            time.sleep(0.5)
+            time.sleep(5)
 
     print("Returns: ", returns)
 
