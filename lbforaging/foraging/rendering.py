@@ -6,6 +6,7 @@ import math
 import os
 import sys
 
+from enum import Enum
 import numpy as np
 import six
 from gymnasium import error
@@ -48,10 +49,14 @@ _WHITE = (255, 255, 255)
 _GREEN = (0, 255, 0)
 _RED = (255, 0, 0)
 _BLUE = (0, 0, 255)
+_YELLOW = (255, 255, 0)
+_ORANGE = (255, 165, 0)
+_PURPLE = (128, 0, 128)
 
 _BACKGROUND_COLOR = _WHITE
 _GRID_COLOR = _BLACK
 
+from .environment import FoodDecayType
 
 def get_display(spec):
     """Convert a display specification (such as :0) into an actual Display
@@ -76,7 +81,7 @@ class Viewer(object): # Visualization Renderer Class - responsible for creating 
         self.rows, self.cols = world_size
         
         # set the size of grid and icon
-        self.grid_size = 50
+        self.grid_size = 60
         self.icon_size = 20
         # set the size of window
         self.width = 1 + self.cols * (self.grid_size + 1)
@@ -221,10 +226,11 @@ class Viewer(object): # Visualization Renderer Class - responsible for creating 
         batch_invisible.draw()
 
         for row, col in idxes:
-            level_str = ",".join(map(str, env.field[row, col]))
+            level_str = ",".join(map(str, np.round(env.field[row, col], 1)))
             self._draw_level_badge(row, col, level_str)
             spawn_time = str(env.food_spawn_time[row, col])
             self._draw_time_badge(row, col, spawn_time)
+            self._draw_decayType_badge(row, col, env.food_decay_type[row, col])
 
     def _draw_players(self, env):
         players = []
@@ -244,12 +250,16 @@ class Viewer(object): # Visualization Renderer Class - responsible for creating 
             p.update(scale=self.grid_size / p.width)
         batch.draw()
         for p in env.players:
-            level_str = ",".join(map(str, p.level))
+            level_str = ",".join(map(str, np.round(p.level, 1)))
             self._draw_level_badge(*p.position, level_str)
 
     def _draw_level_badge(self, row, col, level): # draw level badge
-        resolution = 6
-        radius = self.grid_size / 4 # radius of badge
+        resolution = 4
+        text_length = len(str(level))
+        font_size = 10 if text_length > 3 else 12
+        char_width = font_size * 0.5
+        rect_width = char_width * text_length * 1.3
+        rect_height = font_size * 1.5
         # calculate position of badge
         badge_x = col * (self.grid_size + 1) + (3 / 4) * (self.grid_size + 1)
         badge_y = (
@@ -260,25 +270,24 @@ class Viewer(object): # Visualization Renderer Class - responsible for creating 
 
         # make a circle
         verts = []
-        for i in range(resolution):
-            angle = 2 * math.pi * i / resolution
-            x = radius * math.cos(angle) + badge_x
-            y = radius * math.sin(angle) + badge_y
-            verts += [x, y]
-        circle = pyglet.graphics.vertex_list(resolution, ("v2f", verts))
-        glColor3ub(*_WHITE)
-        circle.draw(GL_POLYGON)
-        glColor3ub(*_BLACK)
-        circle.draw(GL_LINE_LOOP)
+        verts += [badge_x-rect_width/2, badge_y-rect_height/2]
+        verts += [badge_x-rect_width/2, badge_y+rect_height/2]
+        verts += [badge_x+rect_width/2, badge_y+rect_height/2]
+        verts += [badge_x+rect_width/2, badge_y-rect_height/2]
 
-        font_size = 8 if len(str(level)) > 3 else 12
+        rect = pyglet.graphics.vertex_list(resolution, ("v2f", verts))
+        glColor3ub(*_WHITE)
+        rect.draw(GL_POLYGON)
+        glColor3ub(*_BLACK)
+        rect.draw(GL_LINE_LOOP)
+
         label = pyglet.text.Label(
             str(level),
             font_name="Times New Roman",
             font_size=font_size,
             bold=True,
-            x=badge_x,
-            y=badge_y + 2,
+            x=badge_x + 1,
+            y=badge_y,
             anchor_x="center",
             anchor_y="center",
             color=(*_BLACK, 255),
@@ -287,7 +296,9 @@ class Viewer(object): # Visualization Renderer Class - responsible for creating 
 
     def _draw_time_badge(self, row, col, time): # draw time badge
         resolution = 20
-        radius = self.grid_size / 6 # radius of badge
+
+        font_size = 8 if len(str(time)) > 2 else 10
+        radius = font_size * 0.8 # radius of badge
         # calculate position of badge
         badge_x = col * (self.grid_size + 1) + (3 / 4) * (self.grid_size + 1)
         badge_y = (
@@ -309,17 +320,50 @@ class Viewer(object): # Visualization Renderer Class - responsible for creating 
         glColor3ub(*_BLACK)
         circle.draw(GL_LINE_LOOP)
 
-        font_size = 8 if len(str(time)) > 2 else 12
         label = pyglet.text.Label(
             str(time),
             font_name="Times New Roman",
             font_size=font_size,
             bold=True,
             x=badge_x,
-            y=badge_y + 2,
+            y=badge_y,
             anchor_x="center",
             anchor_y="center",
             color=(*_BLACK, 200),
         )
         label.draw()
 
+    def _draw_decayType_badge(self, row, col, decayType):
+        if decayType == FoodDecayType.NONE:
+            decayTypeText = 'N'
+        elif decayType == FoodDecayType.LINEAR_DECAY:
+            decayTypeText = 'L'
+        elif decayType == FoodDecayType.EXPONENTIAL_DECAY:
+            decayTypeText = 'E'
+        elif decayType == FoodDecayType.RANDOM_FLUCTUATE:
+            decayTypeText = 'R'
+        else:
+            decayTypeText = '?'
+            raise ValueError("Invalid decay type")
+
+        badge_x = col * (self.grid_size + 1) + (1 / 5) * (self.grid_size + 1)
+        badge_y = (
+            self.height
+            - (self.grid_size + 1) * (row + 1)
+            + (4 / 5) * (self.grid_size + 1)
+        )
+
+        font_size = 10
+
+        label = pyglet.text.Label(
+            decayTypeText,
+            font_name="Times New Roman",
+            font_size=font_size,
+            bold=True,
+            x=badge_x,
+            y=badge_y,
+            anchor_x="center",
+            anchor_y="center",
+            color=(*_PURPLE, 200),
+        )
+        label.draw()

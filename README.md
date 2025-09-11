@@ -39,6 +39,9 @@ This environment is a mixed cooperative-competitive game, which focuses on the c
 
 More specifically, agents are placed in the grid world, and each is assigned a level vector (formerly a scalar level). Food is also randomly scattered, each having a level vector on its own. Agents can navigate the environment and can attempt to collect food placed next to them. The collection of food is successful only if the sum of the levels of the agents involved in loading meets or exceeds the food's level vector in each dimension. Finally, agents are awarded points based on the food's level vector and their contribution proportional to their level vector components. The figures below show two states of the game, one that requires cooperation, and one more competitive.
 
+The environment now supports dynamic food spawning with visibility delays. When initializing the environment, each food item is assigned a random spawn time between these two values (inclusive). This feature adds a new dimension to the environment, requiring agents to plan their actions based on both current and future food availability.
+
+Additionally, the environment now supports dynamic changes to food levels over time, including linear decay, exponential decay, and random fluctuations. This feature introduces temporal dynamics to the environment, requiring agents to adapt their strategies based on the changing value of food resources.
 
 While it may appear simple, this is a very challenging environment, requiring the cooperation of multiple agents while being competitive at the same time. In addition, the discount factor also necessitates speed for the maximisation of rewards. Each agent is only awarded points if it participates in the collection of food, and it has to balance between collecting low-levelled food on his own or cooperating in acquiring higher rewards. In situations with three or more agents, highly strategic decisions can be required, involving agents needing to choose with whom to cooperate. Another significant difficulty for RL algorithms is the sparsity of rewards, which causes slower learning.
 
@@ -113,6 +116,14 @@ Where n-obs, n-rewards, n-done and n-info are LISTS of N items (where N is the n
 
 ## Observation Space
 
+The observation space consists of the following components:
+
+1. **Food Field**: A grid representation of the environment showing the position and level of food items that are visible to the agent. 
+2. **Agent Positions**: The positions of all agents in the environment. 
+3. **Agent Levels**: The level vectors of all agents (if `observe_agent_levels` is True).
+
+With the food spawn time modification, **only foods that have reached their spawn time (i.e., are visible) are included in the observation space**. Foods that have been spawned but not yet visible (translucent) are not included in the agent's observations.
+
 ## Action space
 
 actions is a LIST of N INTEGERS (one of each agent) that should be executed in that step. The integers should correspond to the Enum below:
@@ -151,7 +162,24 @@ for a in adj_players: # the players that participated in loading the food
             adj_player_level * self._food_spawned
         )  # normalize reward so that the final sum of rewards is one.
 ```
+## New Feature: Food Dynamic Level Changes
 
+The environment now supports dynamic changes to food levels over time. This feature can be enabled by setting `enable_food_dynamic_level=True` when creating the environment. Each food item is assigned a random decay type at spawn time, which determines how its level vector changes over time. The following decay types are supported:
+
+1. **None (NONE)**: Food levels remain constant over time.
+2. **Linear Decay (LINEAR_DECAY)**: Food levels decrease linearly over time based on a decay rate.
+3. **Exponential Decay (EXPONENTIAL_DECAY)**: Food levels decrease exponentially over time based on a decay factor.
+4. **Random Fluctuation (RANDOM_FLUCTUATE)**: Food levels fluctuate randomly within a specified range.
+
+Key parameters for configuring food dynamic level changes:
+
+- `food_decay_rates`: A list of two values specifying the minimum and maximum decay rates for linear decay.
+- `food_decay_factors`: A list of two values specifying the minimum and maximum decay factors for exponential decay.
+- `food_fluctuation_range`: A list of two values specifying the minimum and maximum fluctuations for random fluctuation.
+
+When a food's level in all dimensions drops below a small epsilon value (1e-6), it is removed from the environment.
+
+This feature introduces temporal dynamics to the environment, requiring agents to make strategic decisions about when to collect food based on its changing value. For example, agents might need to prioritize collecting food that is decaying rapidly or wait for food that is fluctuating to reach a higher value.
 
 <!-- HUMAN PLAY SCRIPT -->
 # Human Play
@@ -162,7 +190,7 @@ python human_play.py --env <env_name>
 ```
 where `<env_name>` is the name of the environment you want to play. For example, to play an LBF task with two agents and one food in a 8x8 grid, run:
 ```sh
-python human_play.py --env Foraging-8x8-2p-1f-v3
+python human_play.py --env Foraging-8x8-2p-1f-2d-v3
 ```
 
 Within the script, you can control a single agent at the time using the following keys:
@@ -212,7 +240,7 @@ Within the script, you can control a single agent at the time using the followin
 <!-- CONTACT -->
 # Contact
 
-Filippos Christianos - f.christianos@ed.ac.uk
+sink - sssssink@163.com
 
-Project Link: [https://github.com/semitable/lb-foraging](https://github.com/semitable/lb-foraging)
+This project is a fork of the original lb-foraging project. The original project is available at [https://github.com/semitable/lb-foraging](https://github.com/semitable/lb-foraging).
 

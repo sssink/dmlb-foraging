@@ -8,7 +8,7 @@ import gymnasium as gym
 from gymnasium.utils import seeding
 import numpy as np
 
-
+EPSILON = 1e-6
 class Action(Enum):
     NONE = 0
     NORTH = 1
@@ -24,6 +24,12 @@ class CellEntity(Enum):
     EMPTY = 1
     FOOD = 2
     AGENT = 3
+
+class FoodDecayType(Enum):
+    NONE = 0 # no decay
+    LINEAR_DECAY = 1
+    EXPONENTIAL_DECAY = 2
+    RANDOM_FLUCTUATE = 3
 
 
 class Player:
@@ -91,21 +97,37 @@ class ForagingEnv(gym.Env):
         force_coop, # whether to force cooperation
         level_dim, # dimension of the level
         food_spawn_min_time=0, # minimum time between food spawns
-        food_spawn_max_time=10, # maximum time between food spawns
+        food_spawn_max_time=15, # maximum time between food spawns
         normalize_reward=True,
         grid_observation=False,
         observe_agent_levels=True,
         penalty=0.0,
         render_mode=None,
+        enable_food_dynamic_level=True,
+        food_decay_rates=[0.04, 0.1], # can be adjusted
+        food_decay_factors=[0.8, 0.95],
+        food_fluctuation_range=[-0.2, 0.2],
     ):
         self.logger = logging.getLogger(__name__)
         self.render_mode = render_mode
         self.players = [Player() for _ in range(players)]
         self.level_dim = level_dim # save dimension info
 
-        self.field = np.zeros(field_size+(level_dim,), np.int32) # modify field to 3D, storing the level vector
-        self.visible_field = np.zeros(field_size+(level_dim,), np.int32)
+        self.field = np.zeros(field_size+(level_dim,), np.float32) # modify field to 3D, storing the level vector
+        self.visible_field = np.zeros(field_size+(level_dim,), np.float32)
+        self.initial_field = np.zeros(field_size+(level_dim,), np.float32) # used for reward normalization
 
+        self.enable_food_dynamic_level = enable_food_dynamic_level
+        self.food_decay_rates = food_decay_rates
+        self.food_decay_factors = food_decay_factors
+        self.food_fluctuation_range = food_fluctuation_range
+
+        self.food_decay_type = np.full(field_size, FoodDecayType.NONE, dtype=object)
+        self.food_decay_params = np.empty(field_size, dtype=object)
+        for i in range(field_size[0]):
+            for j in range(field_size[1]):
+                self.food_decay_params[i, j] = {}
+        
         self.penalty = penalty
 
         # modify min_food_level to be a 2D array
@@ -182,7 +204,7 @@ class ForagingEnv(gym.Env):
                 ), f"min_player_level must be less than or equal to max_player_level for each player but was {min_player_level} > {max_player_level} for player {i}"
         
         # set food spawn time
-        self.food_spawn_time = np.full(field_size, -1, dtype=int)
+        self.food_spawn_time = np.full(field_size, -1, dtype=np.int32)
         self.food_spawn_min_time = food_spawn_min_time
         self.food_spawn_max_time = food_spawn_max_time
         
@@ -226,7 +248,7 @@ class ForagingEnv(gym.Env):
         max_food_level_per_dim = (
             self.max_food_level.max(axis=0)
             if self.max_food_level is not None
-            else max_player_level_per_dim * 2 # can adjust
+            else max_player_level_per_dim * 2 # (todo) can be adjusted
         )
 
         # no grid observation
@@ -367,13 +389,13 @@ class ForagingEnv(gym.Env):
         )
 
     def adjacent_food_location(self, row, col): # return the location of the food in the adjacent cells
-        if row > 1 and np.any(self.visible_field[row - 1, col] > 0):
+        if row > 1 and np.any(self.visible_field[row - 1, col] > EPSILON):
             return row - 1, col
-        elif row < self.rows - 1 and np.any(self.visible_field[row + 1, col] > 0):
+        elif row < self.rows - 1 and np.any(self.visible_field[row + 1, col] > EPSILON):
             return row + 1, col
-        elif col > 1 and np.any(self.visible_field[row, col - 1] > 0):
+        elif col > 1 and np.any(self.visible_field[row, col - 1] > EPSILON):
             return row, col - 1
-        elif col < self.cols - 1 and np.any(self.visible_field[row, col + 1] > 0):
+        elif col < self.cols - 1 and np.any(self.visible_field[row, col + 1] > EPSILON):
             return row, col + 1
 
     def adjacent_players(self, row, col): # return the players in the adjacent cells
@@ -403,43 +425,97 @@ class ForagingEnv(gym.Env):
 
             # check if it has neighbors:
             if (
-                self.neighborhood(self.field, row, col).sum() > 0 # (todo:food can overlap with food that has not yet been generated at time 0)
-                or self.neighborhood(self.field, row, col, distance=2, ignore_diag=True) > 0
+                self.neighborhood(self.field, row, col).sum() > EPSILON # (todo:food can overlap with food that has not yet been generated at time 0)
+                or self.neighborhood(self.field, row, col, distance=2, ignore_diag=True) > EPSILON
                 or not self.is_empty_location(row, col)
             ):
                 continue
             
-            food_level = np.zeros(self.level_dim, dtype=int)
+            food_level = np.zeros(self.level_dim, dtype=np.float32)
             for i in range(self.level_dim):
                 if min_levels[food_count][i] == max_levels[food_count][i]:
                     food_level[i] = min_levels[food_count][i]
                 else:
-                    food_level[i] = self.np_random.integers(
-                        min_levels[food_count][i], max_levels[food_count][i] + 1
+                    food_level[i] = self.np_random.uniform(
+                        min_levels[food_count][i], max_levels[food_count][i]
                     )
             
             self.field[row, col] = food_level
+            self.initial_field[row, col] = food_level
 
             # set food spawn time
             self.food_spawn_time[row, col] = self.np_random.integers(self.food_spawn_min_time, self.food_spawn_max_time+1)
+
+            if self.enable_food_dynamic_level:
+                self.food_decay_type[row, col] = self.np_random.choice(list(FoodDecayType))
+
+                params = {}
+                if self.food_decay_type[row, col] == FoodDecayType.LINEAR_DECAY:
+                    decay_rates = []
+                    decay_rate=self.np_random.uniform(self.food_decay_rates[0], self.food_decay_rates[1])
+                    for i in range(self.level_dim):
+                        decay_rates.append(decay_rate)
+                    params['decay_rate'] = np.array(decay_rates)
+                elif self.food_decay_type[row, col] == FoodDecayType.EXPONENTIAL_DECAY:
+                    decay_factors = []
+                    for i in range(self.level_dim):
+                        decay_factors.append(self.np_random.uniform(self.food_decay_factors[0], self.food_decay_factors[1]))
+                    params['decay_factor'] = np.array(decay_factors)
+                elif self.food_decay_type[row, col] == FoodDecayType.RANDOM_FLUCTUATE:
+                    params['min_delta'] = self.food_fluctuation_range[0]
+                    params['max_delta'] = self.food_fluctuation_range[1]
+                self.food_decay_params[row, col] = params
+            else:
+                self.food_decay_type[row, col] = FoodDecayType.NONE
 
             food_count += 1
         self._food_spawned = self.field.sum(axis=(0, 1))
 
     # check if the food is visible
     def is_food_visible(self, row, col):
-        return np.any(self.visible_field[row, col] > 0)
+        return np.any(self.visible_field[row, col] > EPSILON)
 
     def _update_visible_field(self):
         self.visible_field.fill(0)
         for row in range(self.rows):
             for col in range(self.cols):
-                if np.any(self.field[row, col] > 0) and self.food_spawn_time[row, col] <= self.current_step:
+                if np.any(self.field[row, col] > EPSILON) and self.food_spawn_time[row, col] <= self.current_step:
                     self.visible_field[row, col] = self.field[row, col]
+
+    def _update_food_levels(self):
+        if not self.enable_food_dynamic_level:
+            return
+
+        for row in range(self.rows):
+            for col in range(self.cols):
+                if self.is_food_visible(row, col):
+                    decay_type = self.food_decay_type[row, col]
+                    params = self.food_decay_params[row, col]
+
+                    if decay_type == FoodDecayType.LINEAR_DECAY:
+                        for dim in range(self.level_dim):
+                            if self.field[row, col, dim] > EPSILON:
+                                decay = self.initial_field[row, col, dim]*params['decay_rate'][dim]
+                                self.field[row, col, dim] = max(0, self.field[row, col, dim]-decay)
+                    elif decay_type == FoodDecayType.EXPONENTIAL_DECAY:
+                        for dim in range(self.level_dim):
+                            if self.field[row, col, dim] > EPSILON:
+                                self.field[row, col, dim] = max(0, self.field[row, col, dim]*params['decay_factor'][dim])
+                    elif decay_type == FoodDecayType.RANDOM_FLUCTUATE:
+                        for dim in range(self.level_dim):
+                            if self.field[row, col, dim] > EPSILON:
+                                delta = self.np_random.uniform(params['min_delta'], params['max_delta'])
+                                self.field[row, col, dim] = min(max(0, self.field[row, col, dim]+delta), self.initial_field[row, col, dim])
+
+                if np.all(self.field[row, col] <= EPSILON):
+                    self.field[row, col] = np.zeros(self.level_dim, dtype=np.float32)
+                    self.food_spawn_time[row, col] = -1
+                    self.food_decay_type[row, col] = FoodDecayType.NONE
+                    
 
     # check if the location is empty
     def is_empty_location(self, row, col):
-        if np.any(self.field[row, col] != 0): # (todo:players can overlap with food that has not yet been generated at time 0)
+        if np.any(self.field[row, col] > EPSILON): # (todo:players can overlap with food that has not yet been generated at time 0)
             return False
         for a in self.players:
             if a.position and row == a.position[0] and col == a.position[1]:
@@ -462,10 +538,10 @@ class ForagingEnv(gym.Env):
                 row = self.np_random.integers(0, self.rows)
                 col = self.np_random.integers(0, self.cols)
                 if self.is_empty_location(row, col):
-                    player.level = np.zeros(self.level_dim, dtype=int)
+                    player.level = np.zeros(self.level_dim, dtype=np.float32)
                     for i in range(self.level_dim):
-                        player.level[i] = self.np_random.integers(
-                            min_player_level[i], max_player_level[i] + 1
+                        player.level[i] = self.np_random.uniform(
+                            min_player_level[i], max_player_level[i]
                         )
                     player.setup(
                         (row, col),
@@ -481,25 +557,25 @@ class ForagingEnv(gym.Env):
         elif action == Action.NORTH:
             return (
                 player.position[0] > 0
-                and np.all(self.visible_field[player.position[0] - 1, player.position[1]] == 0)
+                and np.all(self.visible_field[player.position[0] - 1, player.position[1]] <= EPSILON)
             )
         elif action == Action.SOUTH:
             return (
                 player.position[0] < self.rows - 1
-                and np.all(self.visible_field[player.position[0] + 1, player.position[1]] == 0)
+                and np.all(self.visible_field[player.position[0] + 1, player.position[1]] <= EPSILON)
             )
         elif action == Action.WEST:
             return (
                 player.position[1] > 0
-                and np.all(self.visible_field[player.position[0], player.position[1] - 1] == 0)
+                and np.all(self.visible_field[player.position[0], player.position[1] - 1] <= EPSILON)
             )
         elif action == Action.EAST:
             return (
                 player.position[1] < self.cols - 1
-                and np.all(self.visible_field[player.position[0], player.position[1] + 1] == 0)
+                and np.all(self.visible_field[player.position[0], player.position[1] + 1] <= EPSILON)
             )
         elif action == Action.LOAD:
-            return np.any(self.adjacent_food(*player.position) > 0)
+            return np.any(self.adjacent_food(*player.position) > EPSILON)
 
         self.logger.error("Undefined action {} from {}".format(action, player.name))
         raise ValueError("Undefined action")
@@ -565,7 +641,7 @@ class ForagingEnv(gym.Env):
                 obs[food_obs_len * i + 1] = -1
                 for dim in range(self.level_dim):
                     obs[food_obs_len * i + 2 + dim] = 0
-            for i, (y, x) in enumerate(zip(*np.where(np.any(observation.field > 0, axis = 2)))):
+            for i, (y, x) in enumerate(zip(*np.where(np.any(observation.field > EPSILON, axis = 2)))):
                 obs[food_obs_len * i] = y
                 obs[food_obs_len * i + 1] = x
                 for dim in range(self.level_dim):
@@ -632,7 +708,7 @@ class ForagingEnv(gym.Env):
                 player_x, player_y = player.position
                 access_layer[player_x + self.sight, player_y + self.sight] = 0.0
             # food locations are not accessible
-            foods_x, foods_y = np.where(np.any(self.field > 0, axis = 2))
+            foods_x, foods_y = np.where(np.any(self.field > EPSILON, axis = 2))
             for x, y in zip(foods_x, foods_y):
                 access_layer[x + self.sight, y + self.sight] = 0.0
             all_layers.append(access_layer)
@@ -661,7 +737,6 @@ class ForagingEnv(gym.Env):
                 ]
             )
         else:
-            print(observations)
             nobs = tuple([make_obs_array(obs) for obs in observations])
 
         # check the space of obs
@@ -680,9 +755,15 @@ class ForagingEnv(gym.Env):
             # setting seed
             super().reset(seed=seed, options=options)
 
-        self.field = np.zeros(self.field_size+(self.level_dim,), np.int32)
+        self.field = np.zeros(self.field_size+(self.level_dim,), np.float32)
         self.food_spawn_time = np.full(self.field_size, -1, np.int32)
-        self.visible_field = np.zeros(self.field_size+(self.level_dim,), np.int32)
+        self.visible_field = np.zeros(self.field_size+(self.level_dim,), np.float32)
+        self.initial_field = np.zeros(self.field_size+(self.level_dim,), np.float32)
+        self.food_decay_type = np.full(self.field_size, FoodDecayType.NONE, dtype=object)
+        self.food_decay_params = np.empty(self.field_size, dtype=object)
+        for i in range(self.field_size[0]):
+            for j in range(self.field_size[1]):
+                self.food_decay_params[i, j] = {}
         
         self.spawn_players(self.min_player_level, self.max_player_level)
         max_player_levels = np.array([player.level for player in self.players]).max(axis=0)
@@ -692,7 +773,7 @@ class ForagingEnv(gym.Env):
             min_levels=self.min_food_level,
             max_levels=self.max_food_level
             if self.max_food_level is not None
-            else np.array([max_player_levels * 2] * self.max_num_food),
+            else np.array([max_player_levels * 2] * self.max_num_food), # (todo) can be adjusted
         )
         self.current_step = 0
 
@@ -786,13 +867,15 @@ class ForagingEnv(gym.Env):
                     for i in range(self.level_dim):
                         a.reward += float(a.level[i] * food[i])
             # and the food is removed
-            self.field[frow, fcol] = np.zeros(self.level_dim, dtype=int)
+            self.field[frow, fcol] = np.zeros(self.level_dim, dtype=np.float32)
             self.food_spawn_time[frow, fcol] = -1
+            self.food_decay_type[frow, fcol] = FoodDecayType.NONE
 
+        self._update_food_levels()
         self._update_visible_field()
 
         self._game_over = (
-            self.field.sum() == 0 or self._max_episode_steps <= self.current_step
+            self.field.sum() <= EPSILON or self._max_episode_steps <= self.current_step
         )
         self._gen_valid_moves()
 
