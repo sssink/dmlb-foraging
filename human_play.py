@@ -99,6 +99,7 @@ class InteractiveLBFEnv:
             print(f"\tLoading: {[i + 1 for i in self.loading_agents]}")
         print(f"\tObs: {obss[self.current_agent_index]}")
         print(f"\tRew: {round(rews[self.current_agent_index], 3)}")
+        print(f"\tRewV: {rews}")
         print(f"\tDone: {done}")
         print()
 

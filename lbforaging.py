@@ -1,6 +1,7 @@
 import argparse
 import logging
 import time
+import sys
 
 import gymnasium as gym
 import numpy as np
@@ -23,7 +24,11 @@ def _game_loop(env, render):
 
     if render:
         env.render()
-        time.sleep(0.5)
+        # time.sleep(0.5)
+        print("press 'Enter' to continue.(input 'q' to exit)")
+        user_input = input().strip().lower()
+        if user_input == 'q':
+            sys.exit(0)
 
     while not done:
         actions = env.action_space.sample()
@@ -35,13 +40,17 @@ def _game_loop(env, render):
 
         if render:
             env.render()
-            time.sleep(5)
+            # time.sleep(0.5)
+            print("press 'Enter' to continue.(input 'q' to exit)")
+            user_input = input().strip().lower()
+            if user_input == 'q':
+                sys.exit(0)
 
     print("Returns: ", returns)
 
 
 def main(episodes=1, render=False):
-    env = gym.make("Foraging-8x8-3p-2f-2d-pen-v3")
+    env = gym.make("Foraging-8x8-3p-2f-2d-v3")
     for episode in range(episodes):
         _game_loop(env, render)
 
